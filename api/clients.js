@@ -1,5 +1,3 @@
-import { buildTavilyQueries, normalizeClient } from './lib/client-scoring.mjs';
-
 export default async function handler(req, res) {
   res.setHeader(
     'Cache-Control',
@@ -15,6 +13,14 @@ export default async function handler(req, res) {
       });
     }
 
+    // Load the ESM scoring module dynamically.
+    // This avoids ERR_REQUIRE_ESM when Vercel compiles
+    // this serverless function to CommonJS.
+    const {
+      buildTavilyQueries,
+      normalizeClient
+    } = await import('./lib/client-scoring.mjs');
+
     const service = String(
       req.query.service || 'Meta Ads'
     ).slice(0, 60);
@@ -24,7 +30,10 @@ export default async function handler(req, res) {
         ? 'rd'
         : 'worldwide';
 
-    const queries = buildTavilyQueries(service, region);
+    const queries = buildTavilyQueries(
+      service,
+      region
+    );
 
     const responses = await Promise.all(
       queries.map(async (query) => {
@@ -35,9 +44,10 @@ export default async function handler(req, res) {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${key}`
+                accept: 'application/json'
               },
               body: JSON.stringify({
+                api_key: key,
                 query,
                 search_depth: 'basic',
                 max_results: 8,
@@ -47,17 +57,9 @@ export default async function handler(req, res) {
             }
           );
 
-          const text = await r.text();
-
-          let data;
-
-          try {
-            data = JSON.parse(text);
-          } catch {
-            data = {
-              error: text || 'Tavily returned an invalid response.'
-            };
-          }
+          const data = await r
+            .json()
+            .catch(() => ({}));
 
           return {
             ok: r.ok,
@@ -67,7 +69,7 @@ export default async function handler(req, res) {
         } catch (error) {
           return {
             ok: false,
-            status: 0,
+            status: 500,
             data: {
               error: error.message
             }
@@ -76,43 +78,31 @@ export default async function handler(req, res) {
       })
     );
 
-    const failedResponses = responses.filter(
-      (response) => !response.ok
-    );
-
-    if (failedResponses.length > 0) {
-      const firstError = failedResponses[0];
-
-      return res.status(502).json({
-        error: 'Tavily request failed.',
-        status: firstError.status,
-        detail: firstError.data?.error || 'Unknown Tavily error.'
-      });
-    }
-
     const leads = responses
-      .flatMap((response) =>
-        Array.isArray(response.data?.results)
-          ? response.data.results
+      .flatMap((item) =>
+        item.ok
+          ? item.data.results || []
           : []
       )
-      .map((result) =>
-        normalizeClient(result, 'Tavily')
+      .map((item) =>
+        normalizeClient(item, 'Tavily')
       )
-      .filter((lead) => lead.score >= 25);
+      .filter((item) => item.score >= 25);
 
     const unique = [
       ...new Map(
-        leads.map((lead) => [
-          lead.url || lead.id,
-          lead
+        leads.map((item) => [
+          item.url || item.id,
+          item
         ])
       ).values()
-    ].sort(
-      (a, b) =>
-        b.score - a.score ||
-        new Date(b.created) - new Date(a.created)
-    );
+    ]
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          new Date(b.created) -
+            new Date(a.created)
+      );
 
     return res.status(200).json({
       results: unique.slice(0, 100),
@@ -122,7 +112,10 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('Client search failed:', error);
+    console.error(
+      'Client search failed:',
+      error
+    );
 
     return res.status(500).json({
       error: 'Client search failed.',
