@@ -1,129 +1,78 @@
-export default async function handler(req, res) {
-  res.setHeader(
-    'Cache-Control',
-    's-maxage=300, stale-while-revalidate=600'
-  );
+const { buildTavilyQueries, normalizeClient } = require('./lib/client-scoring.js');
+
+function sendJson(res, status, payload) {
+  res.status(status).json(payload);
+}
+
+async function readTavilyResponse(response) {
+  const raw = await response.text();
+  let data = null;
+  try { data = raw ? JSON.parse(raw) : {}; } catch { data = {}; }
+  return { ok: response.ok, status: response.status, data, raw: raw.slice(0, 500) };
+}
+
+module.exports = async function handler(req, res) {
+  res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=300');
+  res.setHeader('X-PowZ-Version', 'v7-final');
 
   try {
-    // Import dinámico para evitar el conflicto CommonJS/ESM de Vercel
-    const {
-      buildTavilyQueries,
-      normalizeClient
-    } = await import('./lib/client-scoring.mjs');
-
     const key = process.env.TAVILY_API_KEY;
+    if (!key) return sendJson(res, 500, { error: 'TAVILY_API_KEY is not configured in Vercel.' });
 
-    if (!key) {
-      return res.status(500).json({
-        error: 'Tavily API key is not configured in Vercel.'
+    const service = String(req.query?.service || 'Meta Ads').slice(0, 60);
+    const region = String(req.query?.region || 'worldwide').toLowerCase() === 'rd' ? 'rd' : 'worldwide';
+    const queries = buildTavilyQueries(service, region).slice(0, 20);
+
+    const responses = await Promise.all(queries.map(async (query) => {
+      try {
+        const response = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            api_key: key,
+            query,
+            search_depth: 'advanced',
+            max_results: 8,
+            topic: 'general',
+            include_answer: false,
+            include_raw_content: false
+          })
+        });
+        return { query, ...(await readTavilyResponse(response)) };
+      } catch (error) {
+        return { query, ok: false, status: 0, data: {}, raw: error.message };
+      }
+    }));
+
+    const failed = responses.filter((r) => !r.ok);
+    const leads = responses
+      .filter((r) => r.ok && Array.isArray(r.data?.results))
+      .flatMap((r) => r.data.results)
+      .map((item) => normalizeClient(item, 'Tavily'))
+      .filter((lead) => lead.isClient && lead.score >= 45)
+      .filter((lead) => lead.url);
+
+    const unique = [...new Map(leads.map((lead) => [lead.url, lead])).values()]
+      .sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime() || b.score - a.score)
+      .slice(0, 100);
+
+    if (!unique.length && failed.length === responses.length) {
+      return sendJson(res, 502, {
+        error: 'Tavily search failed.',
+        detail: failed[0]?.raw || 'No valid response from Tavily.',
+        upstreamStatus: failed[0]?.status || 0
       });
     }
 
-    const service = String(
-      req.query.service || 'Meta Ads'
-    ).slice(0, 60);
-
-    const region =
-      req.query.region === 'rd'
-        ? 'rd'
-        : 'worldwide';
-
-    const queries = buildTavilyQueries(
-      service,
-      region
-    );
-
-    const responses = await Promise.all(
-      queries.map(async (query) => {
-        try {
-          const r = await fetch(
-            'https://api.tavily.com/search',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                accept: 'application/json'
-              },
-              body: JSON.stringify({
-                api_key: key,
-                query,
-                search_depth: 'basic',
-                max_results: 8,
-                topic: 'general',
-                include_answer: false
-              })
-            }
-          );
-
-          const data = await r
-            .json()
-            .catch(() => ({}));
-
-          return {
-            ok: r.ok,
-            status: r.status,
-            data
-          };
-        } catch (error) {
-          return {
-            ok: false,
-            status: 500,
-            data: {
-              error: error.message
-            }
-          };
-        }
-      })
-    );
-
-    const leads = responses
-      .flatMap((response) =>
-        response.ok
-          ? response.data.results || []
-          : []
-      )
-      .map((item) =>
-        normalizeClient(item, 'Tavily')
-      )
-      .filter(
-        (lead) =>
-          lead.isClient === true &&
-          lead.score >= 25
-      );
-
-    const unique = [
-      ...new Map(
-        leads.map((lead) => [
-          lead.url || lead.id,
-          lead
-        ])
-      ).values()
-    ]
-      .sort((a, b) => {
-        const dateA = new Date(a.created).getTime();
-        const dateB = new Date(b.created).getTime();
-
-        if (dateB !== dateA) {
-          return dateB - dateA;
-        }
-
-        return b.score - a.score;
-      });
-
-    return res.status(200).json({
-      results: unique.slice(0, 100),
+    return sendJson(res, 200, {
+      results: unique,
       sourceCount: unique.length,
       queries,
       region,
-      service
+      service,
+      failedQueries: failed.length
     });
-
   } catch (error) {
-    console.error('Client search failed:', error);
-
-    return res.status(500).json({
-      error: 'Client search failed.',
-      detail: error.message
-    });
+    return sendJson(res, 500, { error: 'Client search failed.', detail: error?.message || String(error) });
   }
-}
+};

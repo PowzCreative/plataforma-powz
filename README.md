@@ -1,31 +1,43 @@
-# PowZ Lead Radar — v7 backend fix
+# PowZ Lead Radar — v7 Final
 
-Este ZIP contiene los archivos de backend corregidos para el error:
+This version is intentionally **CommonJS end-to-end** for the Vercel Node functions. It does not import `.mjs` from a CommonJS function, avoiding the `ERR_REQUIRE_ESM` failure seen in production.
 
-`ERR_REQUIRE_ESM: require() of ES Module ... api/lib/client-scoring.mjs`
-
-## Archivos incluidos
+## Files to upload to the GitHub repository
 
 - `api/clients.js`
-- `api/lib/client-scoring.mjs`
 - `api/jobs.js`
-- `tests/client-scoring.test.mjs`
+- `api/lib/client-scoring.js`
+- `tests/clients.test.js`
+- `tests/jobs.test.js`
+- `tests/client-scoring.test.js`
+- `package.json`
+- `vercel.json`
 
-## Cambio principal
+Keep your existing `index.html` if you only want the backend fix.
 
-`api/clients.js` ahora carga `client-scoring.mjs` con `await import(...)` dentro del handler. Esto evita el conflicto de Vercel al compilar las funciones Node desde ESM a CommonJS.
+## Environment variables in Vercel
 
-También se mantiene el scoring de clientes y el orden por fecha más reciente primero.
+Production must contain:
 
-## Cómo usarlo
+- `TAVILY_API_KEY`
+- `ADZUNA_APP_ID`
+- `ADZUNA_APP_KEY`
 
-En tu repositorio actual, reemplaza:
+## What v7 fixes
 
-- `api/clients.js`
-- `api/lib/client-scoring.mjs`
-- `api/jobs.js`
-- `tests/client-scoring.test.mjs`
+1. Removes the `.mjs` / CommonJS module mismatch.
+2. Prevents `patterns.some is not a function` by making the pattern matcher type-safe.
+3. Prevents non-JSON upstream responses from causing `Unexpected token A` crashes.
+4. Jobs are sorted newest → oldest.
+5. Clients are sorted newest → oldest.
+6. Client results require actual help/hiring intent and reject obvious job seekers, educational content and ordinary employee job posts.
+7. Client scoring keeps evidence/reasons for every lead.
+8. Both APIs return structured upstream errors instead of crashing.
+9. Includes regression tests for the production failures.
 
-NO reemplaces `index.html` con este ZIP: este paquete está pensado como parche de backend para conservar la interfaz v7 que ya tienes.
+## Local verification
 
-Después haz commit en `main` y espera el deployment de Vercel.
+```bash
+npm test
+npm run check
+```

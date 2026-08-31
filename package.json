@@ -1,8 +1,13 @@
 {
-  "name": "powz-lead-radar-v0.7",
+  "name": "powz-lead-radar-v7-final",
+  "version": "7.0.0",
   "private": true,
-  "type": "module",
+  "description": "PowZ Lead Radar v7 final - Jobs + Clients backend",
   "scripts": {
-    "test": "node --test tests/client-scoring.test.mjs tests/jobs.test.mjs"
+    "test": "node --test tests/*.test.js",
+    "check": "node --check api/jobs.js && node --check api/clients.js && node --check api/lib/client-scoring.js"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
