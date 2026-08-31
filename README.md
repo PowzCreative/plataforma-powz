@@ -1,14 +1,20 @@
-# PowZ Lead Radar v0.6
+# PowZ Lead Radar v0.7
 
-PowZ Lead Radar now has two modes: Jobs and Clients.
+PowZ Lead Radar has two live discovery modes:
 
-## Modes
+- **Jobs:** Adzuna remote paid-media opportunities, newest first, with stricter relevance filters.
+- **Clients:** Tavily public-web client-intent signals, newest first, with the existing PowZ scoring model.
+- **Local RD:** Clients can restrict searches to Dominican Republic / Santo Domingo signals.
 
-- **Jobs (orange):** live Adzuna remote paid-media opportunities plus safe LinkedIn Jobs search links.
-- **Clients (electric blue):** Tavily public-web search for client-intent signals.
-- **Local RD:** Clients mode can restrict searches to Dominican Republic / Santo Domingo signals.
-- Client results are all shown when detected; the score ranks intent and does not hide lower-scoring leads.
-- Clients mode uses a subtle star-field background and animated orange/blue mode transition.
+## v0.7 fixes
+
+- Fixed the Jobs API syntax issue that caused Vercel 500 responses and `Unexpected token 'A'` in the browser.
+- Jobs are sorted newest → oldest by source publication date.
+- Jobs without a paid-media/media-buying signal are discarded.
+- Unpaid internships and unrelated roles are discarded.
+- Remote-only job filtering is preserved.
+- Clients are sorted newest → oldest.
+- API JSON parsing is defensive so upstream errors are shown clearly instead of as a JSON parsing error.
 
 ## Environment variables
 
@@ -18,16 +24,8 @@ PowZ Lead Radar now has two modes: Jobs and Clients.
 
 Keep all secrets in Vercel Environment Variables. Never commit API keys to GitHub.
 
-## Security / source policy
-
-LinkedIn is not scraped or automated. LinkedIn buttons open public Jobs search URLs so the user can review the original opportunity on LinkedIn.
-
-Client Hunter uses Tavily to discover public web results and normalizes them into a PowZ intent score. It is an assistive ranking system, not proof that a person is a business owner or that they will buy services.
-
-## Local development tests
-
-Run:
+## Tests
 
 ```bash
-node --test tests/client-scoring.test.mjs
+node --test tests/client-scoring.test.mjs tests/jobs.test.mjs
 ```

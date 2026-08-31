@@ -1,0 +1,8 @@
+{
+  "name": "powz-lead-radar-v0.7",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/client-scoring.test.mjs tests/jobs.test.mjs"
+  }
+}
