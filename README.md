@@ -1,31 +1,31 @@
-# PowZ Lead Radar v0.7
+# PowZ Lead Radar — v7 backend fix
 
-PowZ Lead Radar has two live discovery modes:
+Este ZIP contiene los archivos de backend corregidos para el error:
 
-- **Jobs:** Adzuna remote paid-media opportunities, newest first, with stricter relevance filters.
-- **Clients:** Tavily public-web client-intent signals, newest first, with the existing PowZ scoring model.
-- **Local RD:** Clients can restrict searches to Dominican Republic / Santo Domingo signals.
+`ERR_REQUIRE_ESM: require() of ES Module ... api/lib/client-scoring.mjs`
 
-## v0.7 fixes
+## Archivos incluidos
 
-- Fixed the Jobs API syntax issue that caused Vercel 500 responses and `Unexpected token 'A'` in the browser.
-- Jobs are sorted newest → oldest by source publication date.
-- Jobs without a paid-media/media-buying signal are discarded.
-- Unpaid internships and unrelated roles are discarded.
-- Remote-only job filtering is preserved.
-- Clients are sorted newest → oldest.
-- API JSON parsing is defensive so upstream errors are shown clearly instead of as a JSON parsing error.
+- `api/clients.js`
+- `api/lib/client-scoring.mjs`
+- `api/jobs.js`
+- `tests/client-scoring.test.mjs`
 
-## Environment variables
+## Cambio principal
 
-- `ADZUNA_APP_ID`
-- `ADZUNA_APP_KEY`
-- `TAVILY_API_KEY`
+`api/clients.js` ahora carga `client-scoring.mjs` con `await import(...)` dentro del handler. Esto evita el conflicto de Vercel al compilar las funciones Node desde ESM a CommonJS.
 
-Keep all secrets in Vercel Environment Variables. Never commit API keys to GitHub.
+También se mantiene el scoring de clientes y el orden por fecha más reciente primero.
 
-## Tests
+## Cómo usarlo
 
-```bash
-node --test tests/client-scoring.test.mjs tests/jobs.test.mjs
-```
+En tu repositorio actual, reemplaza:
+
+- `api/clients.js`
+- `api/lib/client-scoring.mjs`
+- `api/jobs.js`
+- `tests/client-scoring.test.mjs`
+
+NO reemplaces `index.html` con este ZIP: este paquete está pensado como parche de backend para conservar la interfaz v7 que ya tienes.
+
+Después haz commit en `main` y espera el deployment de Vercel.
