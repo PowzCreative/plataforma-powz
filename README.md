@@ -1,18 +1,29 @@
-# PowZ Lead Radar v0.3
+# PowZ Lead Radar v0.4
 
-Live MVP with an Adzuna connector.
+Live MVP with an Adzuna remote-opportunity connector.
 
-## Required environment variables
+## Environment variables
 
 - `ADZUNA_APP_ID`
 - `ADZUNA_APP_KEY`
 
-Do not commit credentials to GitHub. Configure them in the hosting provider's environment variables.
+Never commit credentials to GitHub.
 
-## Deploy
+## What changed in v0.4
 
-This project is structured for Vercel: `index.html` is the frontend and `api/jobs.js` is the serverless API endpoint.
+- Remote-focused Adzuna queries (`service + remote` and `service + freelance remote`)
+- Remote confidence labels: Worldwide / Remote / Likely remote
+- Preliminary PowZ opportunity score
+- Multiple markets
+- Duplicate removal
+- Newest-first sorting
+- Backend remains server-side so the Adzuna key is not exposed to the browser
 
-The first connector searches multiple Adzuna markets, applies a remote-work heuristic, normalizes results and calculates a preliminary PowZ score.
+## Deployment
 
-Next connectors can be added without changing the frontend contract: each source should return the same normalized opportunity shape.
+Designed for Vercel with:
+- `index.html`
+- `api/jobs.js`
+- `vercel.json`
+
+The next stages add more sources (Jooble, Upwork where authorized, other freelance/job boards and legitimate career-page sources) behind the same normalized opportunity format.

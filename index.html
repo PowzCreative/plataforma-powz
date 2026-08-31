@@ -38,7 +38,7 @@ button,select,input{font:inherit}.btn{border:1px solid var(--border);background:
 <div class="stat"><span>High potential</span><strong id="high">—</strong></div>
 <div class="stat"><span>Last scan</span><strong id="last">—</strong></div>
 </section>
-<section id="list" class="list"><div class="empty">Click <b>Scan opportunities</b> to query the live Adzuna source.</div></section>
+<section id="list" class="list"><div class="empty">Click <b>Scan opportunities</b> to search live remote opportunities.</div></section>
 </main>
 <script>
 const $=s=>document.querySelector(s); let jobs=[];
@@ -48,10 +48,10 @@ function render(){
  filtered=filtered.filter(j=>(j.title+' '+j.description+' '+j.company).toLowerCase().includes($('#q').value.toLowerCase()));
  filtered.sort((a,b)=>$('#sort').value==='score'?b.score-a.score:new Date(b.created)-new Date(a.created));
  $('#count').textContent=filtered.length; $('#remote').textContent=filtered.filter(j=>j.remote).length; $('#high').textContent=filtered.filter(j=>j.score>=85).length;
- $('#list').innerHTML=filtered.length?filtered.map(j=>`<article class="card"><div class="top"><div><h2 class="title">${esc(j.title)}</h2><div class="meta"><span>${esc(j.company||'Unknown company')}</span><span>•</span><span>${esc(j.location||'Unknown location')}</span><span>•</span><span>${esc(j.age)}</span></div></div><div class="score">${j.score}/100</div></div><div class="meta" style="margin-top:12px">${j.remote?'<span class="tag accent">REMOTE</span>':''}<span class="tag">${esc(j.service)}</span>${j.salary?`<span class="tag">${esc(j.salary)}</span>`:''}<span class="tag">${esc(j.source)}</span></div><p class="desc">${esc(j.description).slice(0,520)}${j.description.length>520?'…':''}</p><div class="actions"><a class="btn primary" target="_blank" rel="noopener" href="${esc(j.url)}">View opportunity</a><button class="btn" onclick="navigator.clipboard?.writeText(${JSON.stringify(j.url)})">Copy link</button></div></article>`).join(''):'<div class="empty">No matching opportunities in this scan.</div>';
+ $('#list').innerHTML=filtered.length?filtered.map(j=>`<article class="card"><div class="top"><div><h2 class="title">${esc(j.title)}</h2><div class="meta"><span>${esc(j.company||'Unknown company')}</span><span>•</span><span>${esc(j.location||'Unknown location')}</span><span>•</span><span>${esc(j.age)}</span></div></div><div class="score">${j.score}/100</div></div><div class="meta" style="margin-top:12px">${j.remote?'<span class="tag accent">REMOTE</span>':''}<span class="tag">${esc(j.service)}</span>${j.salary?`<span class="tag">${esc(j.salary)}</span>`:''}<span class="tag">${esc(j.source)}</span></div><p class="desc">${esc(j.description).slice(0,520)}${j.description.length>520?'…':''}</p><div class="actions"><a class="btn primary" target="_blank" rel="noopener" href="${esc(j.url)}">View opportunity</a><button class="btn" onclick="navigator.clipboard?.writeText(${JSON.stringify(j.url)})">Copy link</button></div></article>`).join(''):'<div class="empty">No matching remote opportunities in this scan.</div>';
 }
 async function scan(){
- $('#refresh').disabled=true; $('#sourceStatus').textContent='Scanning…'; $('#error').style.display='none'; $('#list').innerHTML='<div class="empty">Searching live job data…</div>';
+ $('#refresh').disabled=true; $('#sourceStatus').textContent='Scanning…'; $('#error').style.display='none'; $('#list').innerHTML='<div class="empty">Searching live remote opportunities…</div>';
  try{const qs=new URLSearchParams({q:$('#q').value,country:$('#country').value}); const r=await fetch('/api/jobs?'+qs); const data=await r.json(); if(!r.ok) throw new Error(data.error||'Search failed'); jobs=data.results||[]; $('#last').textContent=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); $('#sourceStatus').textContent=`Adzuna · ${data.sourceCount||0} results`; render();}
  catch(e){$('#error').textContent=e.message;$('#error').style.display='block';$('#list').innerHTML='<div class="empty">The live connector could not be reached yet. Check the deployment and API secrets.</div>';$('#sourceStatus').textContent='Error';}
  finally{$('#refresh').disabled=false}

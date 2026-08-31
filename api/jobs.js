@@ -6,7 +6,9 @@ const SERVICE_TERMS = {
   "Paid Social": ["paid social","performance marketing","paid social specialist","social ads"]
 };
 
-const COUNTRIES = ["us","gb","ca","au","de","fr","es","nl","it","ie","nz","sg"];
+// Start with high-volume markets to stay within Adzuna's trial quota.
+// More sources/markets will be added in the next connector stages.
+const COUNTRIES = ["us","gb","ca","au","ie","es","de","nl"];
 
 function pickService(text) {
   const t = text.toLowerCase();
@@ -18,29 +20,35 @@ function pickService(text) {
   return best.service;
 }
 
-function isRemote(text) {
-  const t=text.toLowerCase();
-  return /\b(remote|work from home|work remotely|fully remote|100% remote|remote-first|distributed team|worldwide|work from anywhere|anywhere in the world)\b/.test(t);
+function remoteConfidence(text, query) {
+  const t = `${text} ${query}`.toLowerCase();
+  if (/\b(worldwide|work from anywhere|anywhere in the world|global remote|remote anywhere)\b/.test(t)) return "Worldwide";
+  if (/\b(fully remote|100% remote|remote[- ]first|remote position|remote role|work remotely|working remotely)\b/.test(t)) return "Remote";
+  if (/\b(remote|work from home|home[- ]based|distributed team)\b/.test(t)) return "Likely remote";
+  return "Unknown";
 }
 
-function scoreJob(j) {
+function scoreJob(j, query) {
   const text = `${j.title||""} ${j.description||""}`.toLowerCase();
-  let score=30;
-  if (isRemote(text)) score+=25;
-  if (/\bworldwide|work from anywhere|anywhere in the world\b/.test(text)) score+=12;
+  const remote = remoteConfidence(text, query);
+  let score=35;
+  if (remote==="Worldwide") score+=30;
+  else if (remote==="Remote") score+=25;
+  else if (remote==="Likely remote") score+=15;
   if (/\bfreelance|contract|contractor|part[- ]time|retainer\b/.test(text)) score+=12;
-  if (/\bmeta ads|facebook ads|google ads|tiktok ads|paid social|media buyer|media buying\b/.test(text)) score+=16;
+  if (/\bmeta ads|facebook ads|google ads|tiktok ads|paid social|media buyer|media buying\b/.test(text)) score+=15;
   if (/\bmanage|optimi[sz]e|scale|campaigns?|ad account|roas|cpa|performance\b/.test(text)) score+=8;
   if (/\bintern(ship)?|unpaid|commission only|commission-only\b/.test(text)) score-=35;
   return Math.max(0,Math.min(100,score));
 }
 
-function normalize(j,country) {
+function normalize(j,country,query) {
   const text=`${j.title||""} ${j.description||""}`;
   const created=new Date(j.created||Date.now());
   const ageMs=Math.max(0,Date.now()-created.getTime());
   const mins=Math.floor(ageMs/60000);
   const age=mins<60?`${mins}m ago`:mins<1440?`${Math.floor(mins/60)}h ago`:`${Math.floor(mins/1440)}d ago`;
+  const remote=remoteConfidence(text,query);
   return {
     id:`adzuna-${country}-${j.id}`,
     source:"Adzuna",
@@ -53,9 +61,10 @@ function normalize(j,country) {
     created:j.created||new Date().toISOString(),
     age,
     url:j.redirect_url,
-    remote:isRemote(text),
+    remote:remote!=="Unknown",
+    remoteConfidence:remote,
     service:pickService(text),
-    score:scoreJob(j)
+    score:scoreJob(j,query)
   };
 }
 
@@ -65,26 +74,50 @@ module.exports = async (req,res)=>{
     const appId=process.env.ADZUNA_APP_ID;
     const appKey=process.env.ADZUNA_APP_KEY;
     if(!appId||!appKey) return res.status(500).json({error:"Adzuna credentials are not configured in the deployment environment."});
-    const q=String(req.query.q||"Meta Ads").trim().slice(0,80);
+
+    const requestedService=String(req.query.q||"Meta Ads").trim().slice(0,60);
     const country=String(req.query.country||"all").toLowerCase();
     const codes=country==="all"?COUNTRIES:[country];
-    const terms=q?Array.from(new Set([q,...Object.values(SERVICE_TERMS).flat().filter(x=>x.toLowerCase().includes(q.toLowerCase())||q.toLowerCase().includes(x.toLowerCase())).slice(0,2)])):["Meta Ads"];
+
+    // Search specifically for remote intent. This fixes the previous behavior
+    // where valid Adzuna results were fetched but discarded because "remote"
+    // was not present in the returned text.
+    const terms = requestedService
+      ? [`${requestedService} remote`, `${requestedService} freelance remote`]
+      : ["Meta Ads remote","Meta Ads freelance remote"];
+
     const tasks=[];
-    for(const c of codes.slice(0,12)) for(const term of terms.slice(0,2)){
+    for(const c of codes.slice(0,8)) for(const term of terms){
       const url=new URL(`https://api.adzuna.com/v1/api/jobs/${c}/search/1`);
-      url.searchParams.set("app_id",appId); url.searchParams.set("app_key",appKey);
-      url.searchParams.set("results_per_page","20"); url.searchParams.set("what",term);
-      url.searchParams.set("content-type","application/json"); url.searchParams.set("sort_by","date");
-      tasks.push(fetch(url,{headers:{accept:"application/json"}}).then(async r=>({ok:r.ok,data:await r.json().catch(()=>({})),country:c})));
+      url.searchParams.set("app_id",appId);
+      url.searchParams.set("app_key",appKey);
+      url.searchParams.set("results_per_page","20");
+      url.searchParams.set("what",term);
+      url.searchParams.set("content-type","application/json");
+      url.searchParams.set("sort_by","date");
+      tasks.push(fetch(url,{headers:{accept:"application/json"}}).then(async r=>({
+        ok:r.ok,data:await r.json().catch(()=>({})),country:c,term
+      })));
     }
+
     const responses=await Promise.all(tasks);
     const results=[];
-    for(const x of responses) if(x.ok) for(const j of (x.data.results||[])) {
-      const n=normalize(j,x.country);
+    for(const x of responses) if(x.ok) for(const j of (x.data.results||[])){
+      const n=normalize(j,x.country,x.term);
+      // The query is remote-focused, but we only label as a remote match when
+      // the returned content supports it.
       if(n.remote) results.push(n);
     }
-    const unique=[...new Map(results.map(x=>[x.id,x])).values()].sort((a,b)=>new Date(b.created)-new Date(a.created)||b.score-a.score);
-    return res.status(200).json({results:unique.slice(0,100),sourceCount:unique.length});
+
+    const unique=[...new Map(results.map(x=>[x.id,x])).values()]
+      .sort((a,b)=>new Date(b.created)-new Date(a.created)||b.score-a.score);
+
+    return res.status(200).json({
+      results:unique.slice(0,100),
+      sourceCount:unique.length,
+      queriedMarkets:codes,
+      queries:terms
+    });
   } catch(e) {
     return res.status(500).json({error:"Adzuna connector error.",detail:e.message});
   }
