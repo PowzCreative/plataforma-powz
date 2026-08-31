@@ -1,13 +1,11 @@
 const SERVICE_TERMS = {
   "Meta Ads": ["meta ads","facebook ads","facebook advertising","facebook media buyer","meta advertising"],
-  "Google Ads": ["google ads","google advertising","google ppc","ppc specialist","paid search"],
+  "Media Buying": ["media buyer","media buying","media buyer specialist","paid media","media buying specialist"],
+  "Google Ads": ["google ads","google advertising","google ppc","google paid search","ppc specialist"],
   "TikTok Ads": ["tiktok ads","tiktok advertising","tiktok media buyer"],
-  "Media Buying": ["media buyer","media buying","media buyer specialist","paid media"],
   "Paid Social": ["paid social","performance marketing","paid social specialist","social ads"]
 };
 
-// Start with high-volume markets to stay within Adzuna's trial quota.
-// More sources/markets will be added in the next connector stages.
 const COUNTRIES = ["us","gb","ca","au","ie","es","de","nl"];
 
 function pickService(text) {
@@ -20,35 +18,46 @@ function pickService(text) {
   return best.service;
 }
 
-function remoteConfidence(text, query) {
-  const t = `${text} ${query}`.toLowerCase();
-  if (/\b(worldwide|work from anywhere|anywhere in the world|global remote|remote anywhere)\b/.test(t)) return "Worldwide";
-  if (/\b(fully remote|100% remote|remote[- ]first|remote position|remote role|work remotely|working remotely)\b/.test(t)) return "Remote";
+function remoteConfidence(text) {
+  const t = text.toLowerCase();
+  if (/\b(worldwide|work from anywhere|anywhere in the world|global remote|remote anywhere|location[- ]independent)\b/.test(t)) return "Worldwide";
+  if (/\b(remote[- ]first|100% remote|fully remote|remote position|remote role|work remotely|working remotely)\b/.test(t)) return "Remote";
   if (/\b(remote|work from home|home[- ]based|distributed team)\b/.test(t)) return "Likely remote";
   return "Unknown";
 }
 
-function scoreJob(j, query) {
+function scoreJob(j) {
   const text = `${j.title||""} ${j.description||""}`.toLowerCase();
-  const remote = remoteConfidence(text, query);
+  const remote = remoteConfidence(text);
   let score=35;
   if (remote==="Worldwide") score+=30;
   else if (remote==="Remote") score+=25;
   else if (remote==="Likely remote") score+=15;
-  if (/\bfreelance|contract|contractor|part[- ]time|retainer\b/.test(text)) score+=12;
+
+  if (/\bfreelance|contract|contractor|part[- ]time|retainer|project[- ]based\b/.test(text)) score+=12;
   if (/\bmeta ads|facebook ads|google ads|tiktok ads|paid social|media buyer|media buying\b/.test(text)) score+=15;
-  if (/\bmanage|optimi[sz]e|scale|campaigns?|ad account|roas|cpa|performance\b/.test(text)) score+=8;
+  if (/\bmanage|optimi[sz]e|scale|campaigns?|ad account|roas|cpa|performance|conversion\b/.test(text)) score+=8;
+  if (/\bworldwide|global|anywhere in the world|work from anywhere\b/.test(text)) score+=8;
+  if (/\bdominican republic|dominican|latam|latin america|americas\b/.test(text)) score+=5;
   if (/\bintern(ship)?|unpaid|commission only|commission-only\b/.test(text)) score-=35;
+  if (/\bon-site|onsite|in office|office-based|must relocate\b/.test(text)) score-=25;
+
   return Math.max(0,Math.min(100,score));
 }
 
-function normalize(j,country,query) {
+function linkedinUrl(j) {
+  const keywords = encodeURIComponent(`${j.title||""} ${j.company?.display_name||""}`.trim());
+  const location = encodeURIComponent(j.location?.display_name||"Remote");
+  return `https://www.linkedin.com/jobs/search/?keywords=${keywords}&location=${location}&f_WT=2`;
+}
+
+function normalize(j,country) {
   const text=`${j.title||""} ${j.description||""}`;
   const created=new Date(j.created||Date.now());
   const ageMs=Math.max(0,Date.now()-created.getTime());
   const mins=Math.floor(ageMs/60000);
   const age=mins<60?`${mins}m ago`:mins<1440?`${Math.floor(mins/60)}h ago`:`${Math.floor(mins/1440)}d ago`;
-  const remote=remoteConfidence(text,query);
+  const remote=remoteConfidence(text);
   return {
     id:`adzuna-${country}-${j.id}`,
     source:"Adzuna",
@@ -60,11 +69,12 @@ function normalize(j,country,query) {
     contractType:j.contract_type||j.contract_time||"",
     created:j.created||new Date().toISOString(),
     age,
-    url:j.redirect_url,
     remote:remote!=="Unknown",
     remoteConfidence:remote,
     service:pickService(text),
-    score:scoreJob(j,query)
+    score:scoreJob(j),
+    url:j.redirect_url,
+    linkedinUrl:linkedinUrl(j)
   };
 }
 
@@ -75,48 +85,47 @@ module.exports = async (req,res)=>{
     const appKey=process.env.ADZUNA_APP_KEY;
     if(!appId||!appKey) return res.status(500).json({error:"Adzuna credentials are not configured in the deployment environment."});
 
-    const requestedService=String(req.query.q||"Meta Ads").trim().slice(0,60);
+    const requested=String(req.query.q||"").trim().slice(0,100);
+    const selectedService=String(req.query.service||"all").trim();
     const country=String(req.query.country||"all").toLowerCase();
     const codes=country==="all"?COUNTRIES:[country];
 
-    // Search specifically for remote intent. This fixes the previous behavior
-    // where valid Adzuna results were fetched but discarded because "remote"
-    // was not present in the returned text.
-    const terms = requestedService
-      ? [`${requestedService} remote`, `${requestedService} freelance remote`]
-      : ["Meta Ads remote","Meta Ads freelance remote"];
+    const broadTerms=Object.values(SERVICE_TERMS).flat().slice(0,14);
+    const searchText = requested
+      ? `${requested} remote`
+      : selectedService!=="all"
+        ? `${selectedService} remote`
+        : `(${broadTerms.join(" OR ")}) remote`;
 
-    const tasks=[];
-    for(const c of codes.slice(0,8)) for(const term of terms){
+    const tasks=codes.slice(0,8).map(c=>{
       const url=new URL(`https://api.adzuna.com/v1/api/jobs/${c}/search/1`);
       url.searchParams.set("app_id",appId);
       url.searchParams.set("app_key",appKey);
-      url.searchParams.set("results_per_page","20");
-      url.searchParams.set("what",term);
+      url.searchParams.set("results_per_page","30");
+      url.searchParams.set("what",searchText);
       url.searchParams.set("content-type","application/json");
       url.searchParams.set("sort_by","date");
-      tasks.push(fetch(url,{headers:{accept:"application/json"}}).then(async r=>({
-        ok:r.ok,data:await r.json().catch(()=>({})),country:c,term
-      })));
-    }
+      return fetch(url,{headers:{accept:"application/json"}}).then(async r=>({
+        ok:r.ok,data:await r.json().catch(()=>({})),country:c
+      }));
+    });
 
     const responses=await Promise.all(tasks);
     const results=[];
     for(const x of responses) if(x.ok) for(const j of (x.data.results||[])){
-      const n=normalize(j,x.country,x.term);
-      // The query is remote-focused, but we only label as a remote match when
-      // the returned content supports it.
+      const n=normalize(j,x.country);
       if(n.remote) results.push(n);
     }
 
     const unique=[...new Map(results.map(x=>[x.id,x])).values()]
-      .sort((a,b)=>new Date(b.created)-new Date(a.created)||b.score-a.score);
+      .sort((a,b)=>b.score-a.score||new Date(b.created)-new Date(a.created));
 
     return res.status(200).json({
       results:unique.slice(0,100),
       sourceCount:unique.length,
       queriedMarkets:codes,
-      queries:terms
+      searchText,
+      linkedin:{available:true,mode:"safe_search_links"}
     });
   } catch(e) {
     return res.status(500).json({error:"Adzuna connector error.",detail:e.message});

@@ -1,6 +1,16 @@
-# PowZ Lead Radar v0.4
+# PowZ Lead Radar v0.5
 
-Live MVP with an Adzuna remote-opportunity connector.
+PowZ Lead Radar is a remote paid-media opportunity radar.
+
+## v0.5
+
+- Stronger PowZ scoring: remote, worldwide, freelance/contract, paid-media relevance and negative signals.
+- HOT / STRONG / POSSIBLE opportunity labels.
+- Worldwide counter.
+- Quick searches for Meta Ads, Media Buyer, Google Ads, TikTok Ads and Paid Social.
+- Remote / market filters.
+- LinkedIn safe-search links on every result. These links open LinkedIn Jobs search for the matching title/company and do not scrape or automate LinkedIn.
+- Adzuna remains the live data source in this release.
 
 ## Environment variables
 
@@ -9,21 +19,6 @@ Live MVP with an Adzuna remote-opportunity connector.
 
 Never commit credentials to GitHub.
 
-## What changed in v0.4
+## Next connector stages
 
-- Remote-focused Adzuna queries (`service + remote` and `service + freelance remote`)
-- Remote confidence labels: Worldwide / Remote / Likely remote
-- Preliminary PowZ opportunity score
-- Multiple markets
-- Duplicate removal
-- Newest-first sorting
-- Backend remains server-side so the Adzuna key is not exposed to the browser
-
-## Deployment
-
-Designed for Vercel with:
-- `index.html`
-- `api/jobs.js`
-- `vercel.json`
-
-The next stages add more sources (Jooble, Upwork where authorized, other freelance/job boards and legitimate career-page sources) behind the same normalized opportunity format.
+Add additional legitimate sources behind the same normalized opportunity model, including job boards and freelance marketplaces where API/access terms permit.
