@@ -55,6 +55,17 @@ const CLIENT_INTENT_PATTERNS = [
   /\b(manage|run|scale|optimize|optimise|take over)\b/i
 ];
 
+const DIRECT_REQUEST_PATTERNS = [
+  /\blooking for (a|an|someone|somebody)\b/i,
+  /\bneed (a|an|someone|somebody)\b/i,
+  /\bseeking (a|an|someone|somebody)\b/i,
+  /\bwant to hire\b/i,
+  /\blooking to hire\b/i,
+  /\bneed help\b/i,
+  /\bhire someone\b/i,
+  /\bfind someone\b/i
+];
+
 const EXTERNAL_PROVIDER_PATTERNS =
   /\b(freelancer|freelance|contractor|consultant|agency|partner|specialist|expert|service provider)\b/i;
 
@@ -79,17 +90,6 @@ const CONTENT_PATTERNS =
 const GENERIC_MARKETING_PATTERNS =
   /\b(what is meta ads|what are meta ads|how meta ads work|meta ads strategy|facebook ads strategy|google ads guide)\b/i;
 
-const DIRECT_REQUEST_PATTERNS = [
-  /\blooking for (a|an|someone|somebody)\b/i,
-  /\bneed (a|an|someone|somebody)\b/i,
-  /\bseeking (a|an|someone|somebody)\b/i,
-  /\bwant to hire\b/i,
-  /\blooking to hire\b/i,
-  /\bneed help\b/i,
-  /\bhire someone\b/i,
-  /\bfind someone\b/i
-];
-
 const DATE_PATTERNS = [
   /\b(today|tonight|this morning|this afternoon|this week|yesterday)\b/i,
   /\b(just posted|recently posted|posted recently|new post|just now)\b/i,
@@ -103,38 +103,54 @@ function cleanText(text = '') {
     .trim();
 }
 
-function hasAnyPattern(text, patterns) {
-  if (!Array.isArray(patterns)) {
-    return false;
+/*
+ * Robust pattern matcher.
+ *
+ * Accepts:
+ * - an array of RegExp
+ * - one RegExp
+ * - an array of strings
+ * - one string
+ *
+ * This prevents "patterns.some is not a function".
+ */
+function hasAnyPattern(text = '', patterns) {
+  const value = cleanText(text);
+
+  if (Array.isArray(patterns)) {
+    return patterns.some((pattern) =>
+      hasAnyPattern(value, pattern)
+    );
   }
 
-  return patterns.some((pattern) => {
-    if (pattern instanceof RegExp) {
-      pattern.lastIndex = 0;
-      return pattern.test(text);
-    }
+  if (patterns instanceof RegExp) {
+    patterns.lastIndex = 0;
+    return patterns.test(value);
+  }
 
-    if (typeof pattern === 'string') {
-      return text.toLowerCase().includes(pattern.toLowerCase());
-    }
+  if (typeof patterns === 'string') {
+    return value
+      .toLowerCase()
+      .includes(patterns.toLowerCase());
+  }
 
-    return false;
-  });
+  return false;
 }
 
 function detectService(text = '') {
-  const matches = Object.entries(SERVICE_PATTERNS)
-    .filter(([, pattern]) => {
-      pattern.lastIndex = 0;
-      return pattern.test(text);
-    })
-    .map(([service]) => service);
+  const value = cleanText(text);
 
-  if (matches.length === 0) {
-    return 'Paid Social';
+  for (const [service, pattern] of Object.entries(
+    SERVICE_PATTERNS
+  )) {
+    pattern.lastIndex = 0;
+
+    if (pattern.test(value)) {
+      return service;
+    }
   }
 
-  return matches[0];
+  return 'Paid Social';
 }
 
 function serviceLabel(text = '') {
@@ -200,122 +216,272 @@ export function classifyClient(text = '') {
   const service = detectService(t);
 
   /*
-   * POSITIVE CLIENT SIGNALS
+   * CLIENT INTENT
    */
 
-  if (hasAnyPattern(t, DIRECT_REQUEST_PATTERNS)) {
-    add(35, 'direct hiring/help request');
-  } else if (hasAnyPattern(t, CLIENT_INTENT_PATTERNS)) {
-    add(18, 'client intent signal');
+  const hasDirectRequest =
+    hasAnyPattern(
+      t,
+      DIRECT_REQUEST_PATTERNS
+    );
+
+  const hasGeneralIntent =
+    hasAnyPattern(
+      t,
+      CLIENT_INTENT_PATTERNS
+    );
+
+  if (hasDirectRequest) {
+    add(
+      35,
+      'direct hiring/help request'
+    );
+  } else if (hasGeneralIntent) {
+    add(
+      18,
+      'client intent signal'
+    );
   }
 
-  if (OWNER_PATTERNS.test(t)) {
-    add(20, 'founder/owner signal');
-  }
+  /*
+   * BUSINESS / BUYER SIGNALS
+   */
 
-  if (OWN_BUSINESS_PATTERNS.test(t)) {
-    add(15, 'own-business signal');
-  }
-
-  if (EXTERNAL_PROVIDER_PATTERNS.test(t)) {
-    add(15, 'external-provider signal');
-  }
-
-  if (SERVICE_PATTERNS[service]) {
-    SERVICE_PATTERNS[service].lastIndex = 0;
-
-    if (SERVICE_PATTERNS[service].test(t)) {
-      add(15, `${serviceLabel(t)} service signal`);
-    }
-  }
-
-  if (BUSINESS_CONTEXT_PATTERNS.test(t)) {
-    add(8, 'business context');
+  if (
+    hasAnyPattern(
+      t,
+      OWNER_PATTERNS
+    )
+  ) {
+    add(
+      20,
+      'founder/owner signal'
+    );
   }
 
   if (
-    /\b(manage|run|scale|optimize|optimise|campaigns?|advertising account|ad account|roas|cpa|acquisition)\b/i.test(
+    hasAnyPattern(
+      t,
+      OWN_BUSINESS_PATTERNS
+    )
+  ) {
+    add(
+      15,
+      'own-business signal'
+    );
+  }
+
+  if (
+    hasAnyPattern(
+      t,
+      EXTERNAL_PROVIDER_PATTERNS
+    )
+  ) {
+    add(
+      15,
+      'external-provider signal'
+    );
+  }
+
+  /*
+   * SERVICE SIGNAL
+   */
+
+  const servicePattern =
+    SERVICE_PATTERNS[service];
+
+  if (
+    hasAnyPattern(
+      t,
+      servicePattern
+    )
+  ) {
+    add(
+      15,
+      `${serviceLabel(t)} service signal`
+    );
+  }
+
+  /*
+   * BUSINESS CONTEXT
+   */
+
+  if (
+    hasAnyPattern(
+      t,
+      BUSINESS_CONTEXT_PATTERNS
+    )
+  ) {
+    add(
+      8,
+      'business context'
+    );
+  }
+
+  /*
+   * CAMPAIGN MANAGEMENT
+   */
+
+  if (
+    /\b(manage|run|scale|optimize|optimise|campaigns?|advertising account|ad account|roas|cpa|acquisition|performance)\b/i.test(
       t
     )
   ) {
-    add(8, 'campaign management signal');
-  }
-
-  if (hasAnyPattern(t, DATE_PATTERNS)) {
-    add(5, 'recent/urgent signal');
-  }
-
-  /*
-   * NEGATIVE SIGNALS
-   */
-
-  if (JOB_SEEKER_PATTERNS.test(t)) {
-    add(-70, 'job-seeker signal');
-  }
-
-  if (CONTENT_PATTERNS.test(t)) {
-    add(-60, 'content/education signal');
-  }
-
-  if (GENERIC_MARKETING_PATTERNS.test(t)) {
-    add(-45, 'generic marketing content');
+    add(
+      8,
+      'campaign management signal'
+    );
   }
 
   /*
-   * TRADITIONAL EMPLOYMENT
-   */
-
-  if (EMPLOYMENT_PATTERNS.test(t)) {
-    add(-55, 'traditional employment signal');
-  }
-
-  /*
-   * JOB POSTING SIGNALS
+   * RECENCY / URGENCY
    */
 
   if (
+    hasAnyPattern(
+      t,
+      DATE_PATTERNS
+    )
+  ) {
+    add(
+      5,
+      'recent/urgent signal'
+    );
+  }
+
+  /*
+   * NEGATIVE: JOB SEEKER
+   */
+
+  if (
+    hasAnyPattern(
+      t,
+      JOB_SEEKER_PATTERNS
+    )
+  ) {
+    add(
+      -70,
+      'job-seeker signal'
+    );
+  }
+
+  /*
+   * NEGATIVE: EDUCATIONAL CONTENT
+   */
+
+  if (
+    hasAnyPattern(
+      t,
+      CONTENT_PATTERNS
+    )
+  ) {
+    add(
+      -60,
+      'content/education signal'
+    );
+  }
+
+  /*
+   * NEGATIVE: GENERIC MARKETING CONTENT
+   */
+
+  if (
+    hasAnyPattern(
+      t,
+      GENERIC_MARKETING_PATTERNS
+    )
+  ) {
+    add(
+      -45,
+      'generic marketing content'
+    );
+  }
+
+  /*
+   * NEGATIVE: TRADITIONAL EMPLOYMENT
+   */
+
+  const traditionalEmployment =
+    hasAnyPattern(
+      t,
+      EMPLOYMENT_PATTERNS
+    );
+
+  if (traditionalEmployment) {
+    add(
+      -55,
+      'traditional employment signal'
+    );
+  }
+
+  /*
+   * NEGATIVE: CLEAR JOB POSTING
+   */
+
+  const clearJobPosting =
     /\b(apply now|apply here|submit your resume|send your cv|job opening|job vacancy|vacancy|career opportunity|job description)\b/i.test(
-      t
-    )
-  ) {
-    add(-55, 'job-posting signal');
-  }
-
-  /*
-   * EXPLICIT CLIENT VS JOB CHECK
-   */
-
-  const hasIntent =
-    hasAnyPattern(t, DIRECT_REQUEST_PATTERNS) ||
-    hasAnyPattern(t, CLIENT_INTENT_PATTERNS);
-
-  const clearlyNotClient =
-    JOB_SEEKER_PATTERNS.test(t) ||
-    CONTENT_PATTERNS.test(t) ||
-    GENERIC_MARKETING_PATTERNS.test(t) ||
-    /\b(job opening|job vacancy|apply now|submit your resume|career opportunity)\b/i.test(
       t
     );
 
+  if (clearJobPosting) {
+    add(
+      -55,
+      'job-posting signal'
+    );
+  }
+
   /*
-   * Traditional employee jobs should NOT normally
-   * appear as client opportunities.
-   *
-   * However, if the text explicitly says the company
-   * is looking for an external freelancer/agency,
-   * we allow it.
+   * CLIENT VALIDATION
    */
 
+  const clearlyNotClient =
+    hasAnyPattern(
+      t,
+      JOB_SEEKER_PATTERNS
+    ) ||
+    hasAnyPattern(
+      t,
+      CONTENT_PATTERNS
+    ) ||
+    hasAnyPattern(
+      t,
+      GENERIC_MARKETING_PATTERNS
+    ) ||
+    clearJobPosting;
+
+  /*
+   * A normal employee job should not be
+   * treated as a client.
+   *
+   * Exception:
+   * if the company explicitly wants an
+   * external freelancer/agency/consultant.
+   */
+
+  const hasExternalProvider =
+    hasAnyPattern(
+      t,
+      EXTERNAL_PROVIDER_PATTERNS
+    );
+
   const clearlyEmployeeJob =
-    EMPLOYMENT_PATTERNS.test(t) &&
-    !EXTERNAL_PROVIDER_PATTERNS.test(t) &&
-    !DIRECT_REQUEST_PATTERNS.some((pattern) => pattern.test(t));
+    traditionalEmployment &&
+    !hasExternalProvider &&
+    !hasDirectRequest;
 
   const isClient =
-    hasIntent &&
+    hasDirectRequest ||
+    hasGeneralIntent;
+
+  const finalIsClient =
+    isClient &&
     !clearlyNotClient &&
     !clearlyEmployeeJob &&
     score >= 25;
+
+  /*
+   * SCORE LEVEL
+   */
 
   score = Math.max(
     0,
@@ -336,7 +502,7 @@ export function classifyClient(text = '') {
     level,
     service,
     reasons,
-    isClient
+    isClient: finalIsClient
   };
 }
 
@@ -345,13 +511,13 @@ export function normalizeClient(
   source = 'Tavily'
 ) {
   const title = cleanText(
-    item.title || ''
+    item?.title || ''
   );
 
   const content = cleanText(
-    item.content ||
-      item.description ||
-      ''
+    item?.content ||
+    item?.description ||
+    ''
   );
 
   const text = cleanText(
@@ -362,25 +528,24 @@ export function normalizeClient(
     classifyClient(text);
 
   const date =
-    item.published_date ||
-    item.created ||
-    item.date ||
+    item?.published_date ||
+    item?.created ||
+    item?.date ||
     null;
 
   const isRD =
-    /dominican republic|república dominicana|santo domingo|\bsdq\b/i.test(
+    /\b(dominican republic|república dominicana|santo domingo|sdq)\b/i.test(
       text
     );
 
   const safeUrl =
-    item.url ||
-    '';
+    item?.url || '';
 
   const encodedId =
     Buffer.from(
       safeUrl ||
-        title ||
-        text
+      title ||
+      text
     )
       .toString('base64url')
       .slice(0, 48);
@@ -428,7 +593,7 @@ export function normalizeClient(
     linkedinUrl:
       `https://www.linkedin.com/search/results/content/?keywords=${encodeURIComponent(
         title ||
-          classification.service
+        classification.service
       )}`
   };
 }
