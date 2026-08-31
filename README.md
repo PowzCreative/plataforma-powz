@@ -1,24 +1,33 @@
-# PowZ Lead Radar v0.5
+# PowZ Lead Radar v0.6
 
-PowZ Lead Radar is a remote paid-media opportunity radar.
+PowZ Lead Radar now has two modes: Jobs and Clients.
 
-## v0.5
+## Modes
 
-- Stronger PowZ scoring: remote, worldwide, freelance/contract, paid-media relevance and negative signals.
-- HOT / STRONG / POSSIBLE opportunity labels.
-- Worldwide counter.
-- Quick searches for Meta Ads, Media Buyer, Google Ads, TikTok Ads and Paid Social.
-- Remote / market filters.
-- LinkedIn safe-search links on every result. These links open LinkedIn Jobs search for the matching title/company and do not scrape or automate LinkedIn.
-- Adzuna remains the live data source in this release.
+- **Jobs (orange):** live Adzuna remote paid-media opportunities plus safe LinkedIn Jobs search links.
+- **Clients (electric blue):** Tavily public-web search for client-intent signals.
+- **Local RD:** Clients mode can restrict searches to Dominican Republic / Santo Domingo signals.
+- Client results are all shown when detected; the score ranks intent and does not hide lower-scoring leads.
+- Clients mode uses a subtle star-field background and animated orange/blue mode transition.
 
 ## Environment variables
 
 - `ADZUNA_APP_ID`
 - `ADZUNA_APP_KEY`
+- `TAVILY_API_KEY`
 
-Never commit credentials to GitHub.
+Keep all secrets in Vercel Environment Variables. Never commit API keys to GitHub.
 
-## Next connector stages
+## Security / source policy
 
-Add additional legitimate sources behind the same normalized opportunity model, including job boards and freelance marketplaces where API/access terms permit.
+LinkedIn is not scraped or automated. LinkedIn buttons open public Jobs search URLs so the user can review the original opportunity on LinkedIn.
+
+Client Hunter uses Tavily to discover public web results and normalizes them into a PowZ intent score. It is an assistive ranking system, not proof that a person is a business owner or that they will buy services.
+
+## Local development tests
+
+Run:
+
+```bash
+node --test tests/client-scoring.test.mjs
+```
