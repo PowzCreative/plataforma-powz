@@ -1,78 +1,63 @@
 const { buildTavilyQueries, normalizeClient } = require('./lib/client-scoring.js');
 
-function sendJson(res, status, payload) {
-  res.status(status).json(payload);
+function json(res, status, body) {
+  res.status(status).json(body);
 }
 
-async function readTavilyResponse(response) {
-  const raw = await response.text();
-  let data = null;
-  try { data = raw ? JSON.parse(raw) : {}; } catch { data = {}; }
-  return { ok: response.ok, status: response.status, data, raw: raw.slice(0, 500) };
+async function safeJson(response) {
+  const text = await response.text();
+  try { return { data: JSON.parse(text), raw: text }; }
+  catch { return { data: {}, raw: text }; }
 }
 
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=300');
-  res.setHeader('X-PowZ-Version', 'v7-final');
-
   try {
     const key = process.env.TAVILY_API_KEY;
-    if (!key) return sendJson(res, 500, { error: 'TAVILY_API_KEY is not configured in Vercel.' });
+    if (!key) return json(res, 500, { error: 'Tavily API key is not configured in Vercel.' });
 
-    const service = String(req.query?.service || 'Meta Ads').slice(0, 60);
-    const region = String(req.query?.region || 'worldwide').toLowerCase() === 'rd' ? 'rd' : 'worldwide';
-    const queries = buildTavilyQueries(service, region).slice(0, 20);
+    const service = String(req.query.service || 'Meta Ads').slice(0, 60);
+    const region = req.query.region === 'rd' ? 'rd' : 'worldwide';
+    const minScore = Math.max(0, Math.min(100, Number(req.query.minScore || 50)));
+    const queries = buildTavilyQueries(service, region);
 
     const responses = await Promise.all(queries.map(async (query) => {
-      try {
-        const response = await fetch('https://api.tavily.com/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            api_key: key,
-            query,
-            search_depth: 'advanced',
-            max_results: 8,
-            topic: 'general',
-            include_answer: false,
-            include_raw_content: false
-          })
-        });
-        return { query, ...(await readTavilyResponse(response)) };
-      } catch (error) {
-        return { query, ok: false, status: 0, data: {}, raw: error.message };
-      }
+      const response = await fetch('https://api.tavily.com/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          api_key: key,
+          query,
+          search_depth: 'advanced',
+          max_results: 10,
+          topic: 'general',
+          include_answer: false,
+          include_raw_content: false
+        })
+      });
+      const parsed = await safeJson(response);
+      return { ok: response.ok, status: response.status, data: parsed.data, raw: parsed.raw, query };
     }));
 
-    const failed = responses.filter((r) => !r.ok);
+    const failures = responses.filter((x) => !x.ok).map((x) => ({ status: x.status, query: x.query, detail: String(x.raw).slice(0, 180) }));
     const leads = responses
-      .filter((r) => r.ok && Array.isArray(r.data?.results))
-      .flatMap((r) => r.data.results)
-      .map((item) => normalizeClient(item, 'Tavily'))
-      .filter((lead) => lead.isClient && lead.score >= 45)
-      .filter((lead) => lead.url);
+      .filter((x) => x.ok && Array.isArray(x.data.results))
+      .flatMap((x) => x.data.results)
+      .map((x) => normalizeClient(x, 'Tavily'))
+      .filter((x) => x.isClient && x.score >= minScore && x.service === service);
 
-    const unique = [...new Map(leads.map((lead) => [lead.url, lead])).values()]
-      .sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime() || b.score - a.score)
-      .slice(0, 100);
+    const unique = [...new Map(leads.map((x) => [x.url || x.id, x])).values()]
+      .sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime() || b.score - a.score);
 
-    if (!unique.length && failed.length === responses.length) {
-      return sendJson(res, 502, {
-        error: 'Tavily search failed.',
-        detail: failed[0]?.raw || 'No valid response from Tavily.',
-        upstreamStatus: failed[0]?.status || 0
-      });
-    }
-
-    return sendJson(res, 200, {
-      results: unique,
+    return json(res, 200, {
+      results: unique.slice(0, 100),
       sourceCount: unique.length,
       queries,
       region,
-      service,
-      failedQueries: failed.length
+      minScore,
+      warnings: failures.length ? failures : []
     });
   } catch (error) {
-    return sendJson(res, 500, { error: 'Client search failed.', detail: error?.message || String(error) });
+    return json(res, 500, { error: 'Client search failed.', detail: error?.message || String(error) });
   }
 };

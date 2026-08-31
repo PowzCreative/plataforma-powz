@@ -1,37 +1,37 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const jobsHandler = require('../api/jobs.js');
+const { scoreJob, remoteConfidence, normalizeJob } = require('../api/lib/job-scoring.js');
 
-test('jobs handler returns newest first and filters to remote opportunities', async () => {
-  const originalFetch = global.fetch;
-  const originalNow = Date.now;
-  Date.now = () => new Date('2026-08-31T15:00:00Z').getTime();
-  global.fetch = async () => new Response(JSON.stringify({
-    results: [
-      { id: 1, title: 'Remote Meta Ads Media Buyer', company: { display_name: 'Newest' }, description: 'Remote freelance Meta Ads manager', created: '2026-08-31T14:59:00Z', redirect_url: 'https://example.com/1' },
-      { id: 2, title: 'Meta Ads Specialist', company: { display_name: 'Older' }, description: 'Remote Facebook advertising', created: '2026-08-31T14:00:00Z', redirect_url: 'https://example.com/2' }
-    ]
-  }), { status: 200, headers: { 'content-type': 'application/json' } });
-  process.env.ADZUNA_APP_ID = 'test';
-  process.env.ADZUNA_APP_KEY = 'test';
-  const response = await invoke(jobsHandler, { q: 'Meta Ads', country: 'us', service: 'all' });
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.results.length, 2);
-  assert.equal(response.body.results[0].id, 'adzuna-us-1');
-  global.fetch = originalFetch;
-  Date.now = originalNow;
+test('scores a remote freelance Meta Ads opportunity highly', () => {
+  const job = { title: 'Freelance Meta Ads Media Buyer', description: 'Fully remote. Manage and optimize campaigns, ROAS and CPA.' };
+  assert.ok(scoreJob(job, 'Meta Ads') >= 80);
 });
 
-function invoke(handler, query) {
-  return new Promise((resolve, reject) => {
-    const response = {
-      statusCode: 200,
-      body: null,
-      headers: {},
-      setHeader(name, value) { this.headers[name] = value; },
-      status(code) { this.statusCode = code; return this; },
-      json(body) { this.body = body; resolve(this); }
-    };
-    Promise.resolve(handler({ query }, response)).catch(reject);
-  });
-}
+test('rejects internships and commission-only jobs from the useful range', () => {
+  const job = { title: 'Meta Ads Intern', description: 'Unpaid internship, commission only.' };
+  assert.ok(scoreJob(job, 'Meta Ads') < 50);
+});
+
+test('detects remote confidence', () => {
+  assert.equal(remoteConfidence('Work from anywhere in the world'), 'Worldwide');
+  assert.equal(remoteConfidence('Fully remote position'), 'Remote');
+  assert.equal(remoteConfidence('Hybrid role'), 'Unknown');
+});
+
+test('normalizes an Adzuna job', () => {
+  const item = {
+    id: 123,
+    title: 'Remote Google Ads Specialist',
+    description: 'Remote contract role managing PPC campaigns.',
+    company: { display_name: 'Example Co' },
+    location: { display_name: 'Remote' },
+    contract_type: 'contract',
+    redirect_url: 'https://example.com/job/123',
+    created: '2026-08-31T12:00:00Z'
+  };
+  const job = normalizeJob(item, 'us', 'Google Ads');
+  assert.equal(job.source, 'Adzuna');
+  assert.equal(job.url, 'https://example.com/job/123');
+  assert.equal(job.created, '2026-08-31T12:00:00Z');
+  assert.equal(job.remote, true);
+});
